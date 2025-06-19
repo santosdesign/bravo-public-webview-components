@@ -460,13 +460,23 @@
 
     <script>
         // ⚠️ REPLACE WITH YOUR SUPABASE CREDENTIALS
-        const SUPABASE_URL = 'https://hgemnlltdsjiwehxrqrh.supabase.co';
-        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiYW5vbiIsImlhdCI6MTYyNjI2MTI4OCwiZXhwIjoxOTQxODM3Mjg4fQ.NbV76b-19E_szDyCb7NSiS3WdQuzVLQL1mIdQGZA6z0';
+        const SUPABASE_URL = '<YOUR_SUPABASE_URL>';
+        const SUPABASE_ANON_KEY = '<YOUR_SUPABASE_ANON_KEY>';
 
         // Initialize Supabase client
         const supabase = window.supabase?.createClient ?
-            window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) :
-            supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY,{
+                                           auth: {
+                                           persistSession: false,
+                                           autoRefreshToken: true
+                                           } 
+                                          }) :
+            supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY,{
+                                           auth: {
+                                           persistSession: false,
+                                           autoRefreshToken: true
+                                           } 
+                                          });
 
         let currentTab = 'signin';
         let oauthParams = null;
