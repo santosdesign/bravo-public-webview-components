@@ -151,7 +151,7 @@
                     Click <strong>Start</strong> to connect, grant mic access, then speak.
                     Click <strong>Stop</strong> to end the session. <br>
                     ⚙️ Open your browser console to see socket logs and errors.<br>
-                    🔑 Pass API key and config via URL: ?apiKey=YOUR_KEY&configId=YOUR_CONFIG
+                    🔑 Pass API key/token and config via URL: ?apiKey=YOUR_KEY&configId=YOUR_CONFIG or ?accessToken=YOUR_TOKEN&configId=YOUR_CONFIG
                 </p>
             </div>
             <div id="btn-container">
@@ -164,15 +164,14 @@
     </main>
 
     <!-- Load Hume SDK from CDN -->
-    <script src="https://unpkg.com/hume@0.12.1/dist/index.js"></script>
-    
     <script type="module">
         import * as Hume from 'https://esm.sh/hume@0.12.1';
+        
         (async () => {
-
             // Parse URL parameters
             const urlParams = new URLSearchParams(window.location.search);
-            const apiKey = urlParams.get('apiKey') || urlParams.get('api_key') || 'YOUR_HUME_API_KEY';
+            const apiKey = urlParams.get('apiKey') || urlParams.get('api_key');
+            const accessToken = urlParams.get('accessToken') || urlParams.get('access_token');
             const configId = urlParams.get('configId') || urlParams.get('config_id') || urlParams.get('config') || null;
 
             const startBtn = document.querySelector('#start-btn');
@@ -259,19 +258,20 @@
             // EVI connection functionality
             let client = null;
 
-            function getClient(apiKey) {
+            function getClient() {
                 if (!client) {
-                    client = new Hume.HumeClient({ apiKey });
+                    const config = accessToken ? { accessToken } : { apiKey };
+                    client = new Hume.HumeClient(config);
                 }
                 return client;
             }
 
-            function connectEVI(apiKey, handlers, configId) {
-                if (!apiKey) {
-                    throw new Error("API key is not set.");
+            function connectEVI(handlers, configId) {
+                if (!apiKey && !accessToken) {
+                    throw new Error("API key or access token is required.");
                 }
 
-                const client = getClient(apiKey);
+                const client = getClient();
                 const socket = client.empathicVoice.chat.connect({ configId });
 
                 socket.on("open", handlers.open);
@@ -335,7 +335,7 @@
                         close: handleClose,
                     };
 
-                    socket = connectEVI(apiKey, handlers, configId);
+                    socket = connectEVI(handlers, configId);
                 } catch (err) {
                     console.error("Failed to connect EVI:", err);
                     socket = null;
