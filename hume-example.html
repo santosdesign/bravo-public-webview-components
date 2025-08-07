@@ -166,8 +166,10 @@
     <!-- Load Hume SDK from CDN -->
     <script src="https://unpkg.com/hume@0.12.1/dist/index.js"></script>
     
-    <script>
+    <script type="module">
+        import * as Hume from 'https://unpkg.com/hume@0.12.1/dist/index.js';
         (async () => {
+
             // Parse URL parameters
             const urlParams = new URLSearchParams(window.location.search);
             const apiKey = urlParams.get('apiKey') || urlParams.get('api_key') || 'YOUR_HUME_API_KEY';
