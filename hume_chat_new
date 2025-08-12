@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice UI + EVI Integration</title>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --bg:#1A1A1A;               /* base bg color */
+      --fg:#ECECF1;
+      --muted:#9a9aa3;
+      --accent-start:#c084fc;      /* purple */
+      --accent-end:#f472b6;        /* pink */
+      --radius:18px;
+    }
+
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      background:
+        radial-gradient(1200px 600px at 20% -10%, rgba(245, 86, 160, .15), transparent),
+        radial-gradient(900px 500px at 80% 0%, rgba(140, 100, 255, .12), transparent),
+        var(--bg);
+      color:var(--fg);
+      font:16px/1.5 "Newsreader", ui-serif, Georgia, serif;
+      display:grid;
+      place-items:center;
+    }
+
+    .wrap{
+      width:min(680px, 92vw);
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:28px;
+      padding:40px 16px 120px;
+      position:relative;
+      text-align:center;
+    }
+
+    /* Placeholder animated sphere */
+    .sphere{
+      width:min(56vw, 260px);
+      aspect-ratio:1/1;
+      border-radius:50%;
+      background:
+        radial-gradient(60% 60% at 35% 30%, rgba(255,255,255,.28), rgba(255,255,255,0) 60%),
+        conic-gradient(from 0deg, var(--accent-start), var(--accent-end), var(--accent-start));
+      filter: drop-shadow(0 10px 40px rgba(164, 125, 255, .25));
+      position:relative;
+      overflow:hidden;
+      animation: spin 16s linear infinite, float 7s ease-in-out infinite;
+    }
+    .sphere::after{ /* subtle moving noise sheen */
+      content:"";
+      position:absolute; inset:-20%;
+      background: radial-gradient(50% 50% at 50% 50%, rgba(255,255,255,.12), rgba(255,255,255,0) 60%),
+                  repeating-radial-gradient(circle at 50% 50%, rgba(255,255,255,.02), rgba(255,255,255,.02) 2px, rgba(0,0,0,0) 3px 10px);
+      mix-blend-mode:soft-light;
+      animation: swirl 18s linear infinite;
+    }
+
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes swirl{to{transform:rotate(-360deg)}}
+    @keyframes float{50%{transform:translateY(-6px)}}
+
+    /* Transcript area (last 3–4 lines) */
+    .transcript{
+      width:100%;
+      min-height:5lh; /* room for ~3–4 lines */
+      max-width:560px;
+      color:var(--fg);
+    }
+    .line{opacity:.95}
+    .line.muted{color:var(--muted); opacity:.9}
+
+    /* Session button: circle with text (no icon) */
+    .cta{
+      position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+      width:86px; height:86px; border-radius:50%;
+      display:grid; place-items:center;
+      border:none; cursor:pointer; font-weight:600; letter-spacing:.2px;
+      background: radial-gradient(circle at 30% 30%, #fff, #dcdce3);
+      color:#111;
+      box-shadow:0 12px 36px rgba(0,0,0,.35);
+      transition: transform .12s ease, box-shadow .12s ease, background .2s ease;
+      font-family:"Newsreader", ui-serif, Georgia, serif;
+      font-size:1rem;
+    }
+    .cta:active{ transform:translateX(-50%) scale(.98)}
+    .cta.active{
+      background: radial-gradient(circle at 30% 30%, var(--accent-end), var(--accent-start));
+      color:white;
+      box-shadow:0 16px 44px rgba(200, 130, 255, .45);
+    }
+
+    /* A11y + reduced motion */
+    @media (prefers-reduced-motion: reduce){
+      .sphere{animation:none}
+      .sphere::after{animation:none}
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap" role="main">
+    <div class="sphere" aria-hidden="true"></div>
+
+    <section class="transcript" id="transcript" aria-live="polite" aria-atomic="false">
+      <div class="line">“Ready when you are.”</div>
+      <div class="line muted">“Press Start and speak.”</div>
+    </section>
+  </main>
+
+  <button id="sessionBtn" class="cta" aria-pressed="false" aria-label="Start session">Start</button>
+
+  <!-- Load Hume SDK from CDN -->
+  <script type="module">
+    import * as Hume from 'https://esm.sh/hume@0.12.1';
+
+    // --- URL params (apiKey/accessToken/configId) ---
+    const urlParams = new URLSearchParams(window.location.search);
+    const apiKey = urlParams.get('apiKey') || urlParams.get('api_key');
+    const accessToken = urlParams.get('accessToken') || urlParams.get('access_token');
+    const configId = urlParams.get('configId') || urlParams.get('config_id') || urlParams.get('config') || null;
+
+    // --- UI refs ---
+    const btn = document.getElementById('sessionBtn');
+    const transcriptEl = document.getElementById('transcript');
+
+    // --- EVI state ---
+    let socket = null;
+    let recorder = null;
+    let player = new Hume.EVIWebAudioPlayer();
+    let client = null;
+
+    // Keep a rolling buffer of last 4 assistant lines
+    const lastLines = [];
+
+    function updateTranscript(lines){
+      if (!transcriptEl) return;
+      transcriptEl.innerHTML = '';
+      const recent = lines.slice(-4);
+      recent.forEach((text, i) => {
+        const div = document.createElement('div');
+        div.className = 'line' + (i < recent.length - 1 ? ' muted' : '');
+        div.textContent = text;
+        transcriptEl.appendChild(div);
+      });
+    }
+
+    function setConnected(on){
+      btn.classList.toggle('active', on);
+      btn.textContent = on ? 'End' : 'Start';
+      btn.setAttribute('aria-pressed', String(on));
+      btn.setAttribute('aria-label', on ? 'End session' : 'Start session');
+    }
+
+    function getClient(){
+      if (!client){
+        const cfg = accessToken ? { accessToken } : { apiKey };
+        client = new Hume.HumeClient(cfg);
+      }
+      return client;
+    }
+
+    function connectEVI(handlers, configId){
+      if (!apiKey && !accessToken) {
+        throw new Error('API key or access token is required.');
+      }
+      const c = getClient();
+      const s = c.empathicVoice.chat.connect({ configId });
+      s.on('open', handlers.open);
+      s.on('message', handlers.message);
+      s.on('error', handlers.error);
+      s.on('close', handlers.close);
+      return s;
+    }
+
+    // --- Audio capture ---
+    async function startAudioCapture(socket, timeSliceMs = 80){
+      const mimeTypeResult = Hume.getBrowserSupportedMimeType();
+      const mimeType = mimeTypeResult.success ? mimeTypeResult.mimeType : Hume.MimeType.WEBM;
+      const micAudioStream = await Hume.getAudioStream();
+      Hume.ensureSingleValidAudioTrack(micAudioStream);
+      const rec = new MediaRecorder(micAudioStream, { mimeType });
+      rec.ondataavailable = async (e) => {
+        if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+          const data = await Hume.convertBlobToBase64(e.data);
+          socket.sendAudioInput({ data });
+        }
+      };
+      rec.onerror = (e) => console.error('MediaRecorder error:', e);
+      rec.start(timeSliceMs);
+      return rec;
+    }
+
+    // --- Handlers ---
+    async function handleOpen(){
+      console.log('Socket opened');
+      recorder = await startAudioCapture(socket);
+      await player.init();
+      lastLines.length = 0;
+      updateTranscript(['Connected. Speak when ready.']);
+    }
+
+    function extractTopThreeEmotions(message){
+      const scores = message.models?.prosody?.scores || {};
+      return Object.entries(scores)
+        .sort((a,b)=> b[1]-a[1])
+        .slice(0,3)
+        .map(([emotion, score]) => `${emotion} ${Number(score).toFixed(2)}`);
+    }
+
+    async function handleMessage(msg){
+      switch(msg.type){
+        case 'chat_metadata':
+          console.log('metadata', msg);
+          break;
+        case 'user_message':
+          player.stop();
+          // Optionally show user's last phrase faintly
+          break;
+        case 'assistant_message':
+          // Push assistant text to transcript
+          if (msg?.message?.content){
+            lastLines.push(msg.message.content);
+            updateTranscript(lastLines);
+          }
+          // (optional) log emotions
+          console.log('assistant top emotions:', extractTopThreeEmotions(msg));
+          break;
+        case 'audio_output':
+          await player.enqueue(msg);
+          break;
+        case 'user_interruption':
+          console.log('User interruption detected.');
+          player.stop();
+          break;
+        case 'error':
+          console.error(`EVI Error: Code=${msg.code}, Slug=${msg.slug}, Message=${msg.message}`);
+          break;
+      }
+    }
+
+    function handleError(err){
+      console.error('Socket error:', err);
+    }
+
+    function handleClose(e){
+      console.log('Socket closed:', e);
+      disconnect();
+    }
+
+    async function connect(){
+      if (socket && socket?.readyState < WebSocket.CLOSING) return;
+      setConnected(true);
+      try {
+        const handlers = { open: handleOpen, message: handleMessage, error: handleError, close: handleClose };
+        socket = connectEVI(handlers, configId);
+      } catch (err) {
+        console.error('Failed to connect EVI:', err);
+        socket = null;
+        setConnected(false);
+      }
+    }
+
+    function disconnect(){
+      if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+      socket = null;
+      recorder?.stream.getTracks().forEach(t=>t.stop());
+      recorder = null;
+      player?.dispose();
+      setConnected(false);
+      updateTranscript(['Session ended.']);
+    }
+
+    // --- UI events ---
+    btn.addEventListener('click', () => {
+      const isActive = btn.classList.contains('active');
+      if (isActive) disconnect(); else connect();
+    });
+
+    // initial state
+    setConnected(false);
+  </script>
+</body>
+</html>
