@@ -1,1 +1,1 @@
-# bravo-public-webview-components
+# kora-public-webview-components
