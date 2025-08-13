@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voice UI + EVI Integration</title>
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/@lottiefiles/dotlottie-wc@0.6.2/dist/dotlottie-wc.js" type="module"></script>
+  <style>
+    :root{
+      --bg-start:#1A1A1A;
+      --bg-end:#242424;
+      --fg:#ECECF1;
+      --muted:#9a9aa3;
+      --accent-start:#c084fc;
+      --accent-end:#f472b6;
+      --radius:18px;
+    }
+
+    *{box-sizing:border-box; margin:0; padding:0;}
+    html,body{height:100%;}
+    body{
+      background: linear-gradient(to bottom, var(--bg-start), var(--bg-end));
+      color:var(--fg);
+      font:16px/1.5 "Newsreader", ui-serif, Georgia, serif;
+      display:grid;
+      place-items:center;
+    }
+
+    .wrap{
+      width:min(680px, 92vw);
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      gap:24px;
+      padding:40px 16px 120px;
+      position:relative;
+      text-align:center;
+    }
+
+    .orb{
+      width:clamp(200px, 60vw, 300px);
+      height:clamp(200px, 60vw, 300px);
+      display:grid;
+      place-items:center;
+      filter: drop-shadow(0 10px 40px rgba(164, 125, 255, .25));
+      position: relative;
+    }
+
+    .orb-mask {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 78%;
+      height: 78%;
+      border-radius: 50%;
+      background: radial-gradient(140% 140% at 30% 28%, #2a2a2a 0%, #1a1a1a 58%, #1a1a1a 100%);
+      box-shadow:
+        inset 0 -10px 24px rgba(0,0,0,.35),
+        inset 0 6px 18px rgba(255,255,255,.035);
+      z-index: 3;
+      pointer-events: none;
+      animation: orbSpin 50s linear infinite;
+      will-change: transform;
+    }
+
+    @keyframes orbSpin{ to{ transform: translate(-50%, -50%) rotate(360deg);} }
+
+    .transcript{
+      position:relative;
+      width:100%;
+      max-width:560px;
+      min-height:4.2lh;
+      margin-top:4px;
+      color:var(--fg);
+      overflow:hidden;
+    }
+    .line{opacity:.98; transition:opacity .35s ease, transform .35s ease}
+    .line.fade{opacity:0; transform:translateY(-6px)}
+    .line.muted{color:var(--muted); opacity:.9}
+
+    .cta{
+      position:fixed; left:50%; bottom:24px; transform:translateX(-50%);
+      width:90px; height:90px; border-radius:50%;
+      display:grid; place-items:center;
+      border: .5px solid #FFD97F;
+      cursor:pointer; font-weight:600; letter-spacing:.2px;
+      background: linear-gradient(to bottom, rgba(255, 217, 127, 0.08), rgba(195, 157, 67, 0.08));      
+      color:#fff;
+      box-shadow:0 4px 12px rgba(0,0,0,.25);
+      transition: transform .12s ease, box-shadow .12s ease, background .2s ease, opacity .2s ease;
+      font-family:"Newsreader", ui-serif, Georgia, serif;
+      font-size:1rem;
+      opacity: 1;
+    }
+    .cta:active{ transform:translateX(-50%) scale(.98)}
+    .cta.active{
+      background: linear-gradient(to bottom, #FFD97F, #C39D43);
+      box-shadow: none;
+      opacity: 0.7;
+    }
+
+    @media (prefers-reduced-motion: reduce){
+      .line{transition:none}
+      .orb-mask{animation:none}
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap" role="main">
+    <div class="orb" aria-hidden="true">
+      <dotlottie-wc
+        id="ai-orb"
+        src="https://lottie.host/65dc8b8d-e6d4-4427-9b5b-8a82d7b5a0bf/bqLgg4m1uP.lottie"
+        style="width: 100%; height: 100%"
+        speed="0.7"
+        autoplay
+        loop>
+      </dotlottie-wc>
+      <div class="orb-mask"></div>
+    </div>
+
+    <section class="transcript" id="transcript" aria-live="polite" aria-atomic="false">
+      <div class="line">“Ready when you are.”</div>
+      <div class="line muted">“Press Start and speak.”</div>
+    </section>
+  </main>
+
+  <button id="sessionBtn" class="cta" aria-pressed="false" aria-label="Start session">Start</button>
+
+  <script type="module">
+    import * as Hume from 'https://esm.sh/hume@0.12.1';
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const apiKey = urlParams.get('apiKey') || urlParams.get('api_key');
+    const accessToken = urlParams.get('accessToken') || urlParams.get('access_token');
+    const configId = urlParams.get('configId') || urlParams.get('config_id') || urlParams.get('config') || null;
+
+    const sessionBtn = document.getElementById('sessionBtn');
+    const transcriptEl = document.getElementById('transcript');
+
+    let socket = null;
+    let recorder = null;
+    let player = new Hume.EVIWebAudioPlayer();
+    let client = null;
+
+    const lastLines = [];
+
+    function renderTranscript(){
+      if (!transcriptEl) return;
+      const recent = lastLines.slice(-3);
+      transcriptEl.innerHTML = '';
+      recent.forEach((text, i) => {
+        const div = document.createElement('div');
+        div.className = 'line' + (i < recent.length - 1 ? ' muted' : '');
+        div.textContent = text;
+        transcriptEl.appendChild(div);
+      });
+    }
+
+    function setConnected(on){
+      sessionBtn.classList.toggle('active', on);
+      sessionBtn.textContent = on ? 'End' : 'Start';
+      sessionBtn.setAttribute('aria-pressed', String(on));
+      sessionBtn.setAttribute('aria-label', on ? 'End session' : 'Start session');
+      const orb = document.getElementById('ai-orb');
+      if (orb && 'pause' in orb) {
+        if (on) orb.play?.(); else orb.pause?.();
+      }
+    }
+
+    function getClient(){
+      if (!client){
+        const cfg = accessToken ? { accessToken } : { apiKey };
+        client = new Hume.HumeClient(cfg);
+      }
+      return client;
+    }
+
+    function connectEVI(handlers, configId){
+      if (!apiKey && !accessToken) {
+        throw new Error('API key or access token is required.');
+      }
+      const c = getClient();
+      const s = c.empathicVoice.chat.connect({ configId });
+      s.on('open', handlers.open);
+      s.on('message', handlers.message);
+      s.on('error', handlers.error);
+      s.on('close', handlers.close);
+      return s;
+    }
+
+    async function startAudioCapture(socket, timeSliceMs = 80){
+      const mimeTypeResult = Hume.getBrowserSupportedMimeType();
+      const mimeType = mimeTypeResult.success ? mimeTypeResult.mimeType : Hume.MimeType.WEBM;
+      const micAudioStream = await Hume.getAudioStream();
+      Hume.ensureSingleValidAudioTrack(micAudioStream);
+      const rec = new MediaRecorder(micAudioStream, { mimeType });
+      rec.ondataavailable = async (e) => {
+        if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+          const data = await Hume.convertBlobToBase64(e.data);
+          socket.sendAudioInput({ data });
+        }
+      };
+      rec.onerror = (e) => console.error('MediaRecorder error:', e);
+      rec.start(timeSliceMs);
+      return rec;
+    }
+
+    async function handleOpen(){
+      recorder = await startAudioCapture(socket);
+      await player.init();
+      lastLines.length = 0;
+      lastLines.push('Connected. Speak when ready.');
+      renderTranscript();
+    }
+
+    async function handleMessage(msg){
+      switch(msg.type){
+        case 'assistant_message':
+          if (msg?.message?.content){
+            lastLines.push(msg.message.content);
+            if (lastLines.length > 3) lastLines.splice(0, lastLines.length - 3);
+            renderTranscript();
+          }
+          break;
+        case 'audio_output':
+          await player.enqueue(msg);
+          break;
+        case 'user_message':
+          player.stop();
+          break;
+      }
+    }
+
+    function handleError(err){
+      console.error('Socket error:', err);
+    }
+
+    function handleClose(){
+      disconnect();
+    }
+
+    async function connect(){
+      if (socket && socket?.readyState < WebSocket.CLOSING) return;
+      setConnected(true);
+      try {
+        const handlers = { open: handleOpen, message: handleMessage, error: handleError, close: handleClose };
+        socket = connectEVI(handlers, configId);
+      } catch (err) {
+        console.error('Failed to connect EVI:', err);
+        socket = null;
+        setConnected(false);
+      }
+    }
+
+    function disconnect(){
+      if (socket && socket.readyState < WebSocket.CLOSING) socket.close();
+      socket = null;
+      recorder?.stream.getTracks().forEach(t=>t.stop());
+      recorder = null;
+      player?.dispose();
+      setConnected(false);
+      lastLines.length = 0;
+      lastLines.push('Session ended.');
+      renderTranscript();
+    }
+
+    sessionBtn.addEventListener('click', () => {
+      const isActive = sessionBtn.classList.contains('active');
+      if (isActive) disconnect(); else connect();
+    });
+
+    setConnected(false);
+  </script>
+</body>
+</html>
