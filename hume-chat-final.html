@@ -176,6 +176,8 @@
     const accessToken = urlParams.get('accessToken') || urlParams.get('access_token');
     const configId = urlParams.get('configId') || urlParams.get('config_id') || urlParams.get('config') || null;
     const resumedChatGroupId = urlParams.get('resumedChatGroupId') || urlParams.get('resumed_chat_group_id') || null;
+    const humeAssistantName = urlParams.get('hume_assistant_name') || urlParams.get('humeAssistantName') || null;
+    const xanoAccessToken = urlParams.get('xano_access_token') || urlParams.get('xanoAccessToken') || null;
 
     const sessionBtn = document.getElementById('sessionBtn');
     const transcriptEl = document.getElementById('transcript');
@@ -269,6 +271,23 @@
           break;
         case 'chat_metadata':
           console.log('chat_metadata:', msg);
+          try {
+            if (humeAssistantName && xanoAccessToken && msg?.chatGroupId) {
+              await fetch('https://x8ki-letl-twmt.n7.xano.io/api:rVygeMhr/hume_link_chat', {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${xanoAccessToken}`
+                },
+                body: JSON.stringify({
+                  hume_assistant_name: humeAssistantName,
+                  chatGroupId: msg.chatGroupId
+                })
+              });
+            }
+          } catch (err) {
+            console.error('Failed to link chat in Xano:', err);
+          }
           break;
         case 'audio_output':
           await player.enqueue(msg);
