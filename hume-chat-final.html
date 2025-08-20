@@ -271,12 +271,24 @@
           break;
         case 'tool_call':
           try {
-            const params = msg?.parameters || {};
+            const rawParams = msg?.parameters;
+            let params = {};
+            if (typeof rawParams === 'string') {
+              try {
+                params = JSON.parse(rawParams);
+              } catch (parseErr) {
+                console.warn('tool_call parameters JSON parse failed', rawParams, parseErr);
+              }
+            } else if (rawParams && typeof rawParams === 'object') {
+              params = rawParams;
+            }
+
+            const assistantName = humeAssistantName ?? null;
             const source = params.source;
             const text = params.text;
 
             if (!assistantName || !source || !text) {
-              console.warn('tool_call missing required parameters', { assistantName, source, text, msg });
+              console.warn('tool_call missing required parameters', { assistantName, source, text, rawParams, msg });
               break;
             }
 
@@ -286,7 +298,7 @@
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify({
-                assistant_name: humeAssistantName,
+                assistant_name: assistantName,
                 source,
                 text
               })
@@ -295,8 +307,30 @@
             if (!response.ok) {
               console.error('lookup_kora_data request failed:', response.status, await response.text());
             } else {
-              const data = await response.json().catch(() => null);
-              console.log('lookup_kora_data response:', data);
+              let content;
+              try {
+                content = await response.json();
+              } catch (_) {
+                content = await response.text();
+              }
+              console.log('lookup_kora_data response:', content);
+
+              const toolCallId = msg?.tool_call_id ?? null;
+              if (toolCallId) {
+                const toolResponseMessage = {
+                  type: 'tool_response',
+                  toolCallId,
+                  content: typeof content === 'string' ? content : JSON.stringify(content)
+                };
+
+                if (typeof socket?.sendToolResponseMessage === 'function') {
+                  socket.sendToolResponseMessage(toolResponseMessage);
+                } else {
+                  console.warn('Socket does not support sending tool_response');
+                }
+              } else {
+                console.warn('Missing toolCallId; cannot send tool_response', msg);
+              }
             }
           } catch (err) {
             console.error('Error handling tool_call:', err);
