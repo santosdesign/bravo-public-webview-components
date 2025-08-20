@@ -269,6 +269,39 @@
             renderTranscript();
           }
           break;
+        case 'tool_call':
+          try {
+            const params = msg?.parameters || {};
+            const source = params.source;
+            const text = params.text;
+
+            if (!assistantName || !source || !text) {
+              console.warn('tool_call missing required parameters', { assistantName, source, text, msg });
+              break;
+            }
+
+            const response = await fetch('https://x2d8-ekxq-fg4g.f2.xano.io/api:W1TpR3Ir/lookup_kora_data', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                assistant_name: humeAssistantName,
+                source,
+                text
+              })
+            });
+
+            if (!response.ok) {
+              console.error('lookup_kora_data request failed:', response.status, await response.text());
+            } else {
+              const data = await response.json().catch(() => null);
+              console.log('lookup_kora_data response:', data);
+            }
+          } catch (err) {
+            console.error('Error handling tool_call:', err);
+          }
+          break;
         case 'chat_metadata':
           console.log('chat_metadata:', msg);
           try {
