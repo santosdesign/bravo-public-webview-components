@@ -95,6 +95,10 @@
       opacity: .98;
       transition: opacity .35s ease, transform .35s ease
     }
+    .line.user {
+      font-style: italic;
+      opacity: 0.85;
+    }
 
     .line.fade {
       opacity: 0;
@@ -195,7 +199,7 @@
       transcriptEl.innerHTML = '';
       recent.forEach((text, i) => {
         const div = document.createElement('div');
-        div.className = 'line' + (i < recent.length - 1 ? ' muted' : '');
+        div.className = 'line' + (text.__isUser ? ' user' : '') + (i < recent.length - 1 ? ' muted' : '');
         div.textContent = text;
         transcriptEl.appendChild(div);
       });
@@ -264,7 +268,7 @@
       switch (msg.type) {
         case 'assistant_message':
           if (msg?.message?.content) {
-            lastLines.push(msg.message.content);
+            lastLines.push(Object.assign(new String(msg.message.content), { __isUser: false }));
             if (lastLines.length > 5) lastLines.splice(0, lastLines.length - 5);
             renderTranscript();
           }
@@ -364,7 +368,7 @@
           try {
             const userText = msg?.message?.content || msg?.content || '';
             if (userText && typeof userText === 'string') {
-              lastLines.push(userText);
+              lastLines.push(Object.assign(new String(userText), { __isUser: true }));
               if (lastLines.length > 5) lastLines.splice(0, lastLines.length - 5);
               renderTranscript();
             }
