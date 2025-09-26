@@ -276,7 +276,7 @@
 
           if (typeof socket?.sendUserInput === 'function') {
             // Prefer SDK helper if available
-            socket.sendUserInput({ text, customerSessionId: null });
+            socket.sendUserInput(text);
           } else if (typeof socket?.send === 'function') {
             // Fallback to raw WebSocket payload
             socket.send(JSON.stringify(payload));
